@@ -1156,30 +1156,13 @@ class LatLonSpherical {
 }
 
 
-function drawPath(lat1, lon1, lat2, lon2, m) {
-    // clear current overlays
-    if (m.overlay.marker1) { m.overlay.marker1.setMap(null); m.overlay.marker1 = null; }
-    if (m.overlay.marker2) { m.overlay.marker2.setMap(null); m.overlay.marker1 = null; }
-    if (m.overlay.path)    { m.overlay.path.setMap(null);    m.overlay.path = null; }
 
-    // if supplied lat/long are all valid numbers, draw the path
-    if (!isNaN(lat1+lon1+lat2+lon2)) {
-        const p1 = new google.maps.LatLng(lat1, lon1);
-        const p2 = new google.maps.LatLng(lat2, lon2);
-        const sw = new google.maps.LatLng(Math.min(lat1, lat2), Math.min(lon1, lon2));
-        const ne = new google.maps.LatLng(Math.max(lat1, lat2), Math.max(lon1, lon2));
-        const bnds = new google.maps.LatLngBounds(sw, ne);
-        m.map.fitBounds(bnds);
-        m.overlay.marker1 = new google.maps.Marker({ map: m.map, position: p1, title: 'Point 1', icon: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png' });
-        m.overlay.marker2 = new google.maps.Marker({ map: m.map, position: p2, title: 'Point 2', icon: 'https://maps.google.com/mapfiles/ms/icons/red.png' });
-        m.overlay.path = new google.maps.Polyline({ map: m.map, path: [ p1, p2 ], strokeColor: '#990000', geodesic: m.geodesic });
-    }
-}
-
-
+var MagDec = 8;
+latStr = "34 42 09S";
+lonStr = "138 37 15E";
 function getDestination(disance, trueBearing) {
-    const lat1 = Dms.parse("34 42 09S");
-    const lon1 = Dms.parse("138 37 15E");
+    const lat1 = Dms.parse(latStr);
+    const lon1 = Dms.parse(lonStr);
     const dist = disance; 
     const brng = Dms.parse(trueBearing);
 
@@ -1193,13 +1176,6 @@ function getDestination(disance, trueBearing) {
     
     return p2;
 
-    document.querySelector('#ortho-dest .result-brng').textContent = Dms.toBrng(brngFinal, degFmt);
-
-    // show path on map
-    if (!document.querySelector('#map-ortho-dest-canvas').classList.contains('hide')) {
-        drawPath(p1.lat, p1.lon, p2.lat, p2.lon, maps.orthoDest);
-    }
-    debug('ortho-dest', this.name, this.value, p2.toString(degFmt));
 };
 var flightsArr = [];
 // Initialize and add the map
@@ -1213,30 +1189,49 @@ function initMap() {
         mapTypeId: 'satellite'
     });
 }
-function initMap2(craneloc) {
+function initMap2(crs) {
+    const lat2 = Dms.parse(latStr);
+    const lon2 = Dms.parse(lonStr);
+    const relLoc = new LatLonSpherical(lat2, lon2);
+
     // The location of Uluru
-    const uluru = { lat: craneloc.lat, lng: craneloc.lon};
+    const uluru = { lat: relLoc.lat, lng: relLoc.lon};
     // The map, centered at Uluru
     const map = new google.maps.Map(document.getElementById("map"), {
         zoom: 18,
         center: uluru,
         mapTypeId: 'satellite'
     });
+    var bounds = new google.maps.LatLngBounds();
 
-    const mark = new google.maps.Marker({
-        position: uluru,
+    mark = new google.maps.Marker({
+        position: {lat: relLoc.lat, lng: relLoc.lon},
+        label: "ARP",
         map: map
     });
+    bounds.extend({lat: relLoc.lat, lng: relLoc.lon});
+    for(let e of crs)
+    {
+        mark = new google.maps.Marker({
+            position: {lat: e["latlong"].lat, lng: e["latlong"].lon},
+            map: map
+        });
+        bounds.extend({lat: e["latlong"].lat, lng: e["latlong"].lon});
+    }
+
+
+    map.fitBounds(bounds);
 }
 
 function renderCrane(ind, crane) {
     var res = "";
 
     res += '<tr ind='+ ind +' role="button" data-href="#">';
+    res += '<th>' + crane["NOTAM num"] + '</th>';
     res += '<th>' + crane["height"] + '</th>';
     res += '<td>' + crane["from"] + '</td>';
     res += '<td>' + crane["to"] + '</td>';
-    res += '<td>' +"( " +  crane["DMAG"] + " MAG ) " +"( " +  crane["TN"] + " TN ) " + crane["dist"] + ' Meters Away</td>';
+    res += '<td>' +"( " +  crane["DMAG"] + " MAG ) " +"( " +  crane["TN"] + " TN ) " + crane["distNM"] +'NM ' + crane["distM"]+'M'+ '</td>';
     res += '<td>' + crane["latlong"].toString('dms') + '</td>';
     res += '</tr>'
 
@@ -1248,13 +1243,13 @@ function parseCranes(linesArr){
     cr2 = []
     for (let i=0;i<linesArr.length;i++)
     {
+        linesArr[i] = linesArr[i].trim().split(/\s+/).join(" ");
         if( i > 1 && linesArr[i].includes("OBST CRANE"))
         {
-            linesArr[i] = linesArr[i].trim();
             str2 = "";
             for(let j = i-1;j>=0;j--)
             {
-                if(linesArr[j].includes("AD FROM:"))
+                if(linesArr[j].includes("FROM"))
                 {
                     str2 = linesArr[j];
                     break;
@@ -1267,13 +1262,23 @@ function parseCranes(linesArr){
             degloc = curCraneStr.indexOf("MAG");
             degMag = curCraneStr[degloc - 1];
             distStr = curCraneStr[degloc + 1];
+            num = "";
+            for(let s of dateStr)
+            {
+                if(s.startsWith('C'))
+                {
+                    num = s;
+                    break;
+                }
+            }
             cr1.push(
                 {
                     "height" : curCraneStr[2],
                     "from" : dateStr[2] + " " + dateStr[3],
                     "to" : dateStr[5] + " " + dateStr[6],
                     "DMAG" : degMag,
-                    "dist" : distStr
+                    "dist" : distStr,
+                    "NOTAM num": num
                 }
             );
         }
@@ -1281,11 +1286,12 @@ function parseCranes(linesArr){
 
     for (let i=0;i<linesArr.length;i++)
     {
+        linesArr[i] = linesArr[i].trim().split(/\s+/).join(" ");
         if(linesArr[i].includes("OBST CRANE"))
         {
             linesArr[i] = linesArr[i].trim();
             str2 = "";
-            for(let j = i+1;j<linesArr.length;j++)
+            for(let j = i-1;j>=0;j--)
             {
                 if(linesArr[j].includes("FROM"))
                 {
@@ -1327,6 +1333,10 @@ function searchCranes() {
 
     var pureText = $("#textArea").val();
     var hoursDiff = $("#hours-box").val();
+    latStr = $("#latitude").val();
+    lonStr = $("#longitude").val();
+    MagDec = $("#magDec").val();
+
     hoursDiff = Number(hoursDiff)
     linesArr = pureText.split("\n");
     
@@ -1339,27 +1349,30 @@ function searchCranes() {
         c = cr[i];
 
         degMag = Number(c["DMAG"]);
-        degTrue = (degMag + 8)%360;
+        degTrue = (degMag + MagDec + 360)%360;
 
         distStr = c["dist"];
-        distVal = 0;
+        distM = 0;
+        distNM = 0;
         if(distStr[distStr.length-2] == 'N')
         {
             distStr = distStr.replace(/[^\d.-]/g, '');
-            distVal = Number(distStr);
-            distVal = distVal * 1852;
+            distNM = Number(distStr);
+            distM = distNM * 1852;
         }
         else
         {
             distStr = distStr.replace(/[^\d.-]/g, '');
-            distVal = Number(distStr);
+            distM = Number(distStr);
+            distNM = distM/1852;
+            distNM = distNM.toFixed(2);
         }
-        latlong = getDestination(distVal, degTrue.toString());
-        distVal = Math.round(distVal);
+        latlong = getDestination(distM, degTrue.toString());
+        distM = Math.round(distM);
 
         toDate = new Date();
         today = new Date();
-        if(!c["to"].includes("PERM"))
+        if(!distStr.includes("PERM"))
         {
             toarr = c["to"].split(" ");
             toDate.setUTCMonth(Number(toarr[0])-1);
@@ -1368,12 +1381,7 @@ function searchCranes() {
             toDate.setUTCMinutes(toarr[1][4]+toarr[1][5]);
         }
         var hours = (toDate.valueOf() - today.valueOf())/1000/60/60;
-        hours = Math.abs(hours);
-        console.log(toDate);
-        console.log(today);
-        console.log(hours);
-        console.log(hoursDiff);
-        if(!hoursDiff || toDate > today || hoursDiff >= hours)
+        if(!hoursDiff || hoursDiff >= hours)
         {
             cranes.push(
                 {
@@ -1381,8 +1389,10 @@ function searchCranes() {
                     "from" : c["from"],
                     "to" : c["to"],
                     "DMAG" : c["DMAG"],
+                    "NOTAM num": c["NOTAM num"],
                     "TN" : degTrue,
-                    "dist" : distVal,
+                    "distM" : distM,
+                    "distNM" : distNM,
                     "latlong" : latlong
                 }
             );
@@ -1395,15 +1405,15 @@ function searchCranes() {
         renderCrane(i, cranes[i]);
     }
 
-
+    initMap2(cranes);
 
 }
 $(function(){
     $(".table").on("click", "tr[role=\"button\"]", function (e) {
         ind = $(this).attr('ind');
-        draw(cranes[ind]["latlong"])
+        draw([cranes[ind]])
     });
 });
-function draw(craneloc) {
-    window.initMap = initMap2(craneloc);
+function draw(crs) {
+    window.initMap = initMap2(crs);
 }
