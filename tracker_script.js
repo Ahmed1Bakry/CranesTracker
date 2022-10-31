@@ -1,6 +1,5 @@
 
 
-/* Degree-minutes-seconds (& cardinal directions) separator character */
 let dmsSeparator = '\u202f'; // U+202F = 'narrow no-break space'
 
 
